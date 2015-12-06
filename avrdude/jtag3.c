@@ -431,10 +431,14 @@ int jtag3_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
   return 0;
 }
 
+#define MAX_FRAGMENT_PAYLOAD (USBDEV_MAX_XFER_3 - 4)
 static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
 {
   unsigned char buf[USBDEV_MAX_XFER_3];
   unsigned char status[USBDEV_MAX_XFER_3];
+  int payload_size;
+  int fragment_i = 1;
+  int fragment_count;
   int rv;
 
   if (verbose >= 4)
@@ -446,40 +450,87 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
   avrdude_message(MSG_DEBUG, "\n%s: jtag3_edbg_send(): sending %lu bytes\n",
 	    progname, (unsigned long)len);
 
-  if (len + 8 > USBDEV_MAX_XFER_3)
+  fragment_count = (len + 4 + MAX_FRAGMENT_PAYLOAD - 1) / (MAX_FRAGMENT_PAYLOAD);
+  if (fragment_count > 15)
     {
-      avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): Fragmentation not (yet) implemented!\n",
+      avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): cannot send more than 15 fragments\n",
                       progname);
       return -1;
     }
+
+  /* The first fragment has avr payload headers */
+  if (len > MAX_FRAGMENT_PAYLOAD - 4)
+    payload_size = MAX_FRAGMENT_PAYLOAD - 4;
+  else
+    payload_size = len;
+
   buf[0] = EDBG_VENDOR_AVR_CMD;
-  buf[1] = (1 << 4) | 1;	/* first out of a total of 1 fragments */
-  buf[2] = (len + 4) >> 8;
-  buf[3] = (len + 4) & 0xff;
+  buf[1] = (1 << 4) | fragment_count;	/* first out of a total of fragment_count fragments */
+
+  buf[2] = (payload_size + 4) >> 8;
+  buf[3] = (payload_size + 4) & 0xff;
+
   buf[4] = TOKEN;
   buf[5] = 0;                   /* dummy */
-  u16_to_b2(buf + 6, PDATA(pgm)->command_sequence);
-  memcpy(buf + 8, data, len);
+  u16_to_b2(buf + 6, PDATA(pgm)->command_sequence);  
 
-  if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
-    avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): failed to send command to serial port\n",
-                    progname);
-    return -1;
-  }
-  rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
+  memcpy(buf + 8, data, payload_size);
 
-  if (rv < 0) {
-    /* timeout in receive */
-    avrdude_message(MSG_NOTICE2, "%s: jtag3_edbg_send(): Timeout receiving packet\n",
-                      progname);
-    return -1;
-  }
-  if (status[0] != EDBG_VENDOR_AVR_CMD || status[1] != 0x01)
-    {
-      /* what to do in this case? */
-      avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): Unexpected response 0x%02x, 0x%02x\n",
-                      progname, status[0], status[1]);
-    }
+  do
+    {  
+      data += payload_size;
+      len -= payload_size;
+      fragment_i++;
+
+      if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+         avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): failed to send command to serial port\n",
+                         progname);
+         return -1;
+      }
+
+      rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
+
+      if (rv < 0)
+        {
+          /* timeout in receive */
+          avrdude_message(MSG_NOTICE2, "%s: jtag3_edbg_send(): Timeout receiving packet\n",
+                          progname);
+          return -1;
+        }
+      if (status[0] != EDBG_VENDOR_AVR_CMD || (status[1] != 0x0 && status[1] != 0x1))
+        {
+          avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): Unexpected response message: 0x%02x 0x%02x\n",
+                          progname, status[0], status[1]);
+          return -1;
+        }
+      if (status[1] == 0x00 && len == 0)
+        {
+          avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): Unexpected end of fragment while having %lu bytes to send\n",
+                          progname, (unsigned long) len);
+          return -1;
+        }
+      if (status[1] == 0x01 && len != 0)
+        {
+          avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): Device want more data than expected\n",
+                          progname);
+          return -1;
+        }
+
+      if (len == 0 )
+          break;
+
+      if (len > MAX_FRAGMENT_PAYLOAD)
+          payload_size = MAX_FRAGMENT_PAYLOAD;
+      else
+          payload_size = len;
+
+      buf[0] = EDBG_VENDOR_AVR_CMD;
+      buf[1] = (fragment_i << 4) | fragment_count;
+      buf[2] = payload_size >> 8;
+      buf[3] = payload_size & 0xff;
+      memcpy(buf + 4, data, payload_size);
+    } 
+  while(1);
 
   return 0;
 }
