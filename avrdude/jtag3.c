@@ -434,11 +434,21 @@ int jtag3_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
   return 0;
 }
 
-#define MAX_FRAGMENT_PAYLOAD (USBDEV_MAX_XFER_3 - 4)
+#define MAX_FRAGMENT_PAYLOAD(pgm) (PDATA(pgm)->usb_max_packet_size - 4)
 static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
 {
-  unsigned char buf[USBDEV_MAX_XFER_3];
-  unsigned char status[USBDEV_MAX_XFER_3];
+  unsigned char* buf;
+  if ((buf = malloc(PDATA(pgm)->usb_max_packet_size)) == 0) {
+	    avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size(): memory allocation error\n", progname);
+	    return -ENOMEM;
+  }
+
+  unsigned char* status;
+  if ((status = malloc(PDATA(pgm)->usb_max_packet_size)) == 0) {
+	    avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size(): memory allocation error\n", progname);
+	    return -ENOMEM;
+  }
+
   int payload_size;
   int fragment_i = 1;
   int fragment_count;
@@ -446,14 +456,14 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
 
   if (verbose >= 4)
     {
-      memset(buf, 0, USBDEV_MAX_XFER_3);
-      memset(status, 0, USBDEV_MAX_XFER_3);
+      memset(buf, 0, PDATA(pgm)->usb_max_packet_size);
+      memset(status, 0, PDATA(pgm)->usb_max_packet_size);
     }
 
   avrdude_message(MSG_DEBUG, "\n%s: jtag3_edbg_send(): sending %lu bytes\n",
 	    progname, (unsigned long)len);
 
-  fragment_count = (len + 4 + MAX_FRAGMENT_PAYLOAD - 1) / (MAX_FRAGMENT_PAYLOAD);
+  fragment_count = (len + 4 + MAX_FRAGMENT_PAYLOAD(pgm) - 1) / (MAX_FRAGMENT_PAYLOAD(pgm));
   if (fragment_count > 15)
     {
       avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): cannot send more than 15 fragments\n",
@@ -462,8 +472,8 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
     }
 
   /* The first fragment has avr payload headers */
-  if (len > MAX_FRAGMENT_PAYLOAD - 4)
-    payload_size = MAX_FRAGMENT_PAYLOAD - 4;
+  if (len > MAX_FRAGMENT_PAYLOAD(pgm) - 4)
+    payload_size = MAX_FRAGMENT_PAYLOAD(pgm) - 4;
   else
     payload_size = len;
 
@@ -485,13 +495,13 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
       len -= payload_size;
       fragment_i++;
 
-      if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+      if (serial_send(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size) != 0) {
          avrdude_message(MSG_INFO, "%s: jtag3_edbg_send(): failed to send command to serial port\n",
                          progname);
          return -1;
       }
 
-      rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
+      rv = serial_recv(&pgm->fd, status, PDATA(pgm)->usb_max_packet_size);
 
       if (rv < 0)
         {
@@ -522,8 +532,8 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
       if (len == 0 )
           break;
 
-      if (len > MAX_FRAGMENT_PAYLOAD)
-          payload_size = MAX_FRAGMENT_PAYLOAD;
+      if (len > MAX_FRAGMENT_PAYLOAD(pgm))
+          payload_size = MAX_FRAGMENT_PAYLOAD(pgm);
       else
           payload_size = len;
 
@@ -610,13 +620,13 @@ static int jtag3_edbg_prepare(PROGRAMMER * pgm)
   buf[0] = CMSISDAP_CMD_LED;
   buf[1] = CMSISDAP_LED_CONNECT;
   buf[2] = 1;
-  if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+  if (serial_send(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size) != 0) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_prepare(): failed to send command to serial port\n",
                     progname);
     return -1;
   }
-  rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
-  if (rv != USBDEV_MAX_XFER_3) {
+  rv = serial_recv(&pgm->fd, status, PDATA(pgm)->usb_max_packet_size);
+  if (rv != PDATA(pgm)->usb_max_packet_size) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_prepare(): failed to read from serial port (%d)\n",
                     progname, rv);
     return -1;
@@ -635,26 +645,36 @@ static int jtag3_edbg_prepare(PROGRAMMER * pgm)
  */
 static int jtag3_edbg_signoff(PROGRAMMER * pgm)
 {
-  unsigned char buf[USBDEV_MAX_XFER_3];
-  unsigned char status[USBDEV_MAX_XFER_3];
+	unsigned char* buf;
+	if ((buf = malloc(PDATA(pgm)->usb_max_packet_size)) == 0) {
+		avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size(): memory allocation error\n", progname);
+		return -ENOMEM;
+	}
+
+	unsigned char* status;
+	if ((status = malloc(PDATA(pgm)->usb_max_packet_size)) == 0) {
+		avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size(): memory allocation error\n", progname);
+		return -ENOMEM;
+	}
+
   int rv;
 
   avrdude_message(MSG_DEBUG, "\n%s: jtag3_edbg_signoff()\n",
 	    progname);
 
   if (verbose >= 4)
-    memset(buf, 0, USBDEV_MAX_XFER_3);
+    memset(buf, 0, PDATA(pgm)->usb_max_packet_size);
 
   buf[0] = CMSISDAP_CMD_LED;
   buf[1] = CMSISDAP_LED_CONNECT;
   buf[2] = 0;
-  if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+  if (serial_send(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size) != 0) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_signoff(): failed to send command to serial port\n",
                     progname);
     return -1;
   }
-  rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
-  if (rv != USBDEV_MAX_XFER_3) {
+  rv = serial_recv(&pgm->fd, status, PDATA(pgm)->usb_max_packet_size);
+  if (rv != PDATA(pgm)->usb_max_packet_size) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_signoff(): failed to read from serial port (%d)\n",
                     progname, rv);
     return -1;
@@ -665,13 +685,13 @@ static int jtag3_edbg_signoff(PROGRAMMER * pgm)
                     progname, status[0], status[1]);
 
   buf[0] = CMSISDAP_CMD_DISCONNECT;
-  if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+  if (serial_send(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size) != 0) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_signoff(): failed to send command to serial port\n",
                     progname);
     return -1;
   }
-  rv = serial_recv(&pgm->fd, status, USBDEV_MAX_XFER_3);
-  if (rv != USBDEV_MAX_XFER_3) {
+  rv = serial_recv(&pgm->fd, status, PDATA(pgm)->usb_max_packet_size);
+  if (rv != PDATA(pgm)->usb_max_packet_size) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_signoff(): failed to read from serial port (%d)\n",
                     progname, rv);
     return -1;
@@ -737,7 +757,7 @@ static int jtag3_edbg_recv_frame(PROGRAMMER * pgm, unsigned char **msg) {
 
   avrdude_message(MSG_TRACE, "%s: jtag3_edbg_recv():\n", progname);
 
-  if ((buf = malloc(USBDEV_MAX_XFER_3)) == NULL) {
+  if ((buf = malloc(PDATA(pgm)->usb_max_packet_size)) == NULL) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_recv(): out of memory\n",
 	    progname);
     return -1;
@@ -745,13 +765,13 @@ static int jtag3_edbg_recv_frame(PROGRAMMER * pgm, unsigned char **msg) {
 
   buf[0] = EDBG_VENDOR_AVR_RSP;
 
-  if (serial_send(&pgm->fd, buf, USBDEV_MAX_XFER_3) != 0) {
+  if (serial_send(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size) != 0) {
     avrdude_message(MSG_INFO, "%s: jtag3_edbg_recv(): error sending CMSIS-DAP vendor command\n",
                     progname);
     return -1;
   }
 
-  rv = serial_recv(&pgm->fd, buf, USBDEV_MAX_XFER_3);
+  rv = serial_recv(&pgm->fd, buf, PDATA(pgm)->usb_max_packet_size);
 
   if (rv < 0) {
     /* timeout in receive */
@@ -1007,7 +1027,7 @@ static int jtag3_initialize(PROGRAMMER * pgm, AVRPART * p)
    */
   if (jtag3_getparm(pgm, SCOPE_GENERAL, 0, PARM3_FW_MAJOR, parm, 2) < 0)
     return -1;
-  if (pgm->fd.usb.max_xfer < USBDEV_MAX_XFER_3 && (pgm->flag & PGM_FL_IS_EDBG) == 0) {
+  if (pgm->fd.usb.max_xfer < PDATA(pgm)->usb_max_packet_size && (pgm->flag & PGM_FL_IS_EDBG) == 0) {
     avrdude_message(MSG_INFO, "%s: the JTAGICE3's firmware %d.%d is broken on USB 1.1 connections, sorry\n",
                     progname, parm[0], parm[1]);
     if (ovsigck) {
@@ -1350,7 +1370,7 @@ int jtag3_open_common(PROGRAMMER * pgm, char * port)
   for (usbpid = lfirst(pgm->usbpid); rv < 0 && usbpid != NULL; usbpid = lnext(usbpid)) {
     pinfo.usbinfo.flags = PINFO_FL_SILENT;
     pinfo.usbinfo.pid = *(int *)(ldata(usbpid));
-    pgm->fd.usb.max_xfer = USBDEV_MAX_XFER_3;
+    pgm->fd.usb.max_xfer = PDATA(pgm)->usb_max_packet_size;
     pgm->fd.usb.rep = USBDEV_BULK_EP_READ_3;
     pgm->fd.usb.wep = USBDEV_BULK_EP_WRITE_3;
     pgm->fd.usb.eep = USBDEV_EVT_EP_READ_3;
