@@ -1095,6 +1095,14 @@ programmer
 ;
 
 programmer
+  id    = "xplainedmini";
+  desc  = "Atmel AVR XplainedMini in debugWire mode";
+  type  = "jtagice3_dw";
+  connection_type = usb;
+  usbpid = 0x2145;
+;
+
+programmer
   id    = "atmelice";
   desc  = "Atmel-ICE (ARM/AVR) in JTAG mode";
   type  = "jtagice3";
