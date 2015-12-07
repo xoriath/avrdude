@@ -556,17 +556,29 @@ static int jtag3_edbg_send(PROGRAMMER * pgm, unsigned char * data, size_t len)
 
 static size_t jtag3_edbg_package_size(PROGRAMMER* pgm)
 {
-	unsigned char package_query[DEFAULT_PACKAGE_SIZE];
+	unsigned char package_query[2];
 	unsigned char package_query_response[DEFAULT_PACKAGE_SIZE];
 	package_query[0] = SCOPE_INFO;
 	package_query[1] = _DAP_ID_PACKET_SIZE;
-	if (serial_send(&pgm->fd, package_query, DEFAULT_PACKAGE_SIZE) != 0) {
+
+	if (serial_send(&pgm->fd, package_query, 2) != 0) {
 		avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size() : failed to query for packet size, falling back to %i bits\n", progname, DEFAULT_PACKAGE_SIZE);
 		return DEFAULT_PACKAGE_SIZE;
 	}
 	else {
-		/*int resp = */serial_recv(&pgm->fd, package_query_response, DEFAULT_PACKAGE_SIZE);
-		size_t size = (package_query_response[3] << 8 | package_query_response[4]) - COMMAND_HEADER_SIZE - HID_HEADER_SIZE;
+    if (serial_recv(&pgm->fd, package_query_response, DEFAULT_PACKAGE_SIZE) < 0) {
+      avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size() : failed to query for packet size, could not read command response\n", progname);
+      return -1;
+    }
+    size_t package_length = package_query_response[1];
+
+    // we only expect a 16 bit value back, so length field sould be 2 (bytes)
+    if (package_length != 2) {
+      avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size() : respone packet contains wrong number of bytes (expected 2, got %i)\n", progname, package_length);
+      return -1;
+    }
+
+		size_t size = package_query_response[3] << 8 | package_query_response[2];
 		avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size() : queried for packet size, got %i bits\n", progname, size);
 		return size;
 	}
