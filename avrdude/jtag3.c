@@ -561,6 +561,9 @@ static size_t jtag3_edbg_package_size(PROGRAMMER* pgm)
 	package_query[0] = SCOPE_INFO;
 	package_query[1] = _DAP_ID_PACKET_SIZE;
 
+  if (verbose >= 4)
+    memset(package_query_response, 0, DEFAULT_PACKAGE_SIZE);
+
 	if (serial_send(&pgm->fd, package_query, 2) != 0) {
 		avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size() : failed to query for packet size, falling back to %i bits\n", progname, DEFAULT_PACKAGE_SIZE);
 		return DEFAULT_PACKAGE_SIZE;
@@ -589,6 +592,9 @@ static size_t jtag3_edbg_package_size(PROGRAMMER* pgm)
  */
 static int jtag3_edbg_prepare(PROGRAMMER * pgm)
 {
+
+  PDATA(pgm)->usb_max_packet_size = jtag3_edbg_package_size(pgm);
+
   unsigned char* buf;
   if ((buf = malloc(PDATA(pgm)->usb_max_packet_size)) == 0) {
 	  avrdude_message(MSG_INFO, "%s: jtag3_edbg_package_size(): memory allocation error\n", progname);
@@ -1020,9 +1026,7 @@ static int jtag3_initialize(PROGRAMMER * pgm, AVRPART * p)
   const char *ifname;
   unsigned char cmd[4], *resp;
   int status;
-
-  PDATA(pgm)->usb_max_packet_size = jtag3_edbg_package_size(pgm);
-
+  
   /*
    * At least, as of firmware 2.12, the JTAGICE3 doesn't handle
    * splitting packets correctly.  On a large transfer, the first
